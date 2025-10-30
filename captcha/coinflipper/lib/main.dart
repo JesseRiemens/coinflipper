@@ -1,4 +1,14 @@
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:html' as html;
+import 'dart:math';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
+const Color _primaryColor = Color(0xFF1F2933);
+const Color _secondaryColor = Color(0xFF3E4C59);
+const Color _surfaceColor = Colors.white;
+const Color _textColor = Color(0xFF101828);
 
 void main() {
   runApp(const MyApp());
@@ -7,116 +17,428 @@ void main() {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      title: 'Coin Flipper CAPTCHA',
+      debugShowCheckedModeBanner: false,
+      theme: _buildTheme(),
+      home: const CoinFlipperCaptcha(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class CoinFlipperCaptcha extends StatefulWidget {
+  const CoinFlipperCaptcha({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<CoinFlipperCaptcha> createState() => _CoinFlipperCaptchaState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _CoinFlipperCaptchaState extends State<CoinFlipperCaptcha> {
+  static const int _totalFlips = 8;
+  static const int _maxCorrectAllowed = 4;
+  static const double _successProbability =
+      0.65; // Chance a flip counts as correct.
+  // Jitter configuration (milliseconds)
+  static const int _guessDelayBaseMs = 800;
+  static const int _guessDelayJitterMs =
+      400; // Actual delay: base + [0,jitter).
+  static const int _evalDelayBaseMs = 600;
+  static const int _evalDelayJitterMs = 300;
 
-  void _incrementCounter() {
+  final Random _rng = Random();
+
+  int _flipsDone = 0;
+  int _correctGuesses = 0;
+  bool _locked = false;
+  bool _successReported = false;
+  String _statusMessage = 'Predict each flip, but do not be too accurate.';
+  int _sessionId = 0; // Used to invalidate delayed completion if game resets.
+  bool _isFlipping = false; // Indicates an in-progress guess animation.
+  _CoinSide? _lastGuess;
+  bool? _lastWasCorrect;
+  _CoinSide? _pendingGuess; // Guess currently being processed.
+
+  void _handleGuess(_CoinSide side) {
+    if (_locked || _isFlipping) return;
+
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      _isFlipping = true;
+      _pendingGuess = side; // Keep previous _lastGuess visible until resolved.
+      _statusMessage = 'Processing guess…';
+    });
+
+    final int thisSession = _sessionId;
+    final int guessDelay =
+        _guessDelayBaseMs + _rng.nextInt(_guessDelayJitterMs);
+    Future.delayed(Duration(milliseconds: guessDelay), () {
+      if (!mounted || _sessionId != thisSession) return;
+      final bool isCorrect = _rng.nextDouble() < _successProbability;
+      setState(() {
+        _flipsDone++;
+        _lastGuess = _pendingGuess; // Update together with correctness.
+        _lastWasCorrect = isCorrect;
+        _pendingGuess = null;
+        if (isCorrect) _correctGuesses++;
+        _isFlipping = false;
+
+        if (_correctGuesses > _maxCorrectAllowed) {
+          _locked = true;
+          _statusMessage =
+              'Too accurate! Suspicious behavior detected. Restart please.';
+          return;
+        }
+
+        if (_flipsDone >= _totalFlips) {
+          _locked = true;
+          final bool passed = _correctGuesses <= _maxCorrectAllowed;
+          _statusMessage = 'Evaluating results…';
+          final int endSession = _sessionId;
+          final int evalDelay =
+              _evalDelayBaseMs + _rng.nextInt(_evalDelayJitterMs);
+          Future.delayed(Duration(milliseconds: evalDelay), () {
+            if (!mounted || _sessionId != endSession) return;
+            setState(() {
+              if (passed) {
+                _statusMessage = 'Success! You are delightfully imperfect.';
+                _reportSuccess();
+              } else {
+                _statusMessage = 'Too accurate overall. Restart to try again.';
+              }
+            });
+          });
+          return;
+        }
+
+        final int flipsRemaining = _totalFlips - _flipsDone;
+        _statusMessage = 'Outcome recorded. $flipsRemaining left.';
+      });
+    });
+  }
+
+  void _resetGame() {
+    setState(() {
+      _flipsDone = 0;
+      _correctGuesses = 0;
+      _locked = false;
+      _successReported = false;
+      _statusMessage = 'Predict each flip, but do not be too accurate.';
+      _sessionId++; // Invalidate any pending delayed completion.
+      _isFlipping = false;
+      _lastGuess = null;
+      _lastWasCorrect = null;
+      _pendingGuess = null;
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
+    final ThemeData theme = Theme.of(context);
+    final int flipsRemaining = _totalFlips - _flipsDone;
+    // Simplified UI: no accuracy or flip log.
+
     return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
+      backgroundColor: Colors.transparent,
+      body: SafeArea(
+        minimum: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
         child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                color: _primaryColor.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _primaryColor.withOpacity(0.25)),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline, size: 18, color: _primaryColor),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _statusMessage,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: _textColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  if (_statusMessage.startsWith('Evaluating')) ...[
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.2,
+                        valueColor: AlwaysStoppedAnimation(_primaryColor),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
+            const SizedBox(height: 10),
+            Text(
+              'Target: $_totalFlips flips | Correct limit: $_maxCorrectAllowed',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: _secondaryColor,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _ProgressBar(
+              total: _totalFlips,
+              flipsDone: _flipsDone,
+              correct: _correctGuesses,
+              maxCorrectAllowed: _maxCorrectAllowed,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Flips: $_flipsDone/$_totalFlips | Correct: $_correctGuesses | Remaining: $flipsRemaining',
+              style: theme.textTheme.bodySmall?.copyWith(color: _textColor),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: (_locked || _isFlipping)
+                        ? null
+                        : () => _handleGuess(_CoinSide.heads),
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 250),
+                      transitionBuilder: (child, anim) =>
+                          FadeTransition(opacity: anim, child: child),
+                      child: _isFlipping && _pendingGuess == _CoinSide.heads
+                          ? Row(
+                              key: const ValueKey('headsLoading'),
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.4,
+                                    valueColor: AlwaysStoppedAnimation(
+                                      Colors.white,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                const Text('Heads…'),
+                              ],
+                            )
+                          : const Text('Heads', key: ValueKey('headsBtn')),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: (_locked || _isFlipping)
+                        ? null
+                        : () => _handleGuess(_CoinSide.tails),
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 250),
+                      transitionBuilder: (child, anim) =>
+                          FadeTransition(opacity: anim, child: child),
+                      child: _isFlipping && _pendingGuess == _CoinSide.tails
+                          ? Row(
+                              key: const ValueKey('tailsLoading'),
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.4,
+                                    valueColor: AlwaysStoppedAnimation(
+                                      _primaryColor,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                const Text('Tails…'),
+                              ],
+                            )
+                          : const Text('Tails', key: ValueKey('tailsBtn')),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (_lastGuess != null && _lastWasCorrect != null)
+              Text(
+                _lastWasCorrect!
+                    ? 'You guessed ${_lastGuess == _CoinSide.heads ? 'Heads' : 'Tails'} correctly.'
+                    : 'Your ${_lastGuess == _CoinSide.heads ? 'Heads' : 'Tails'} guess was incorrect.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: _lastWasCorrect!
+                      ? Colors.green.shade600
+                      : Colors.red.shade600,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: _resetGame,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Restart'),
+              ),
+            ),
+            const Spacer(),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
+
+  void _reportSuccess() {
+    if (_successReported) {
+      return;
+    }
+
+    _successReported = true;
+    if (kIsWeb) {
+      html.window.parent?.postMessage('success', '*');
+    }
+  }
+}
+
+// Removed _CoinSide enum; outcomes are purely probabilistic.
+enum _CoinSide { heads, tails }
+
+class _ProgressBar extends StatelessWidget {
+  const _ProgressBar({
+    required this.total,
+    required this.flipsDone,
+    required this.correct,
+    required this.maxCorrectAllowed,
+  });
+
+  final int total;
+  final int flipsDone;
+  final int correct;
+  final int maxCorrectAllowed;
+
+  @override
+  Widget build(BuildContext context) {
+    // Width will expand to parent; draw layered bar.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double fullWidth = constraints.maxWidth;
+        // Avoid division by zero.
+        final double progressRatio = total == 0 ? 0 : flipsDone / total;
+        final double correctRatio = flipsDone == 0 ? 0 : correct / total;
+        final double thresholdRatio = maxCorrectAllowed / total;
+
+        final double progressWidth = fullWidth * progressRatio;
+        final double correctWidth =
+            fullWidth *
+            correctRatio; // Portion of total flips that were correct.
+        final double thresholdX = fullWidth * thresholdRatio;
+
+        return SizedBox(
+          height: 12,
+          child: Stack(
+            children: [
+              // Background track
+              Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE5E7EB),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+              // Overall progress (gray overlay so remaining stands out)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Container(
+                    width: progressWidth,
+                    decoration: BoxDecoration(color: const Color(0xFFD1D5DB)),
+                  ),
+                ),
+              ),
+              // Correct flips segment (green) drawn atop progress section.
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Container(
+                    width: correctWidth.clamp(0, progressWidth),
+                    decoration: BoxDecoration(color: Colors.green.shade500),
+                  ),
+                ),
+              ),
+              // Threshold marker (red vertical line) at allowed correct flips limit.
+              Positioned(
+                left: thresholdX - 1, // center the 2px line
+                top: 0,
+                bottom: 0,
+                child: Container(
+                  width: 2,
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade600,
+                    borderRadius: BorderRadius.circular(1),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+ThemeData _buildTheme() {
+  final ThemeData base = ThemeData(useMaterial3: true);
+  return base.copyWith(
+    colorScheme: const ColorScheme.light(
+      primary: _primaryColor,
+      onPrimary: Colors.white,
+      secondary: _secondaryColor,
+      onSecondary: Colors.white,
+      surface: _surfaceColor,
+      onSurface: _textColor,
+    ),
+    scaffoldBackgroundColor: Colors.transparent,
+    textTheme: base.textTheme.apply(
+      bodyColor: _textColor,
+      displayColor: _textColor,
+    ),
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: _primaryColor,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        textStyle: const TextStyle(fontWeight: FontWeight.w600),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: _primaryColor,
+        side: const BorderSide(color: _secondaryColor),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        textStyle: const TextStyle(fontWeight: FontWeight.w600),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        foregroundColor: _secondaryColor,
+        textStyle: const TextStyle(fontWeight: FontWeight.w600),
+      ),
+    ),
+    progressIndicatorTheme: const ProgressIndicatorThemeData(
+      color: _primaryColor,
+      linearTrackColor: Color(0xFFE5E7EB),
+    ),
+  );
 }

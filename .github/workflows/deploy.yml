@@ -38,15 +38,15 @@ jobs:
       - name: Build web (release)
         working-directory: captcha/coinflipper
         # Deploy Flutter build under /coinflipper/app/ to preserve outer HTML pages at root.
-        run: flutter build web --release --base-href /coinflipper/app/ --no-web-resources-cdn --no-wasm-dry-run
+        run: flutter build web --release --base-href /coinflipper/captcha/app/ --no-web-resources-cdn --no-wasm-dry-run
 
       - name: Prepare site directory
         run: |
-          mkdir -p _site/app
-          mkdir -p _site/captcha
+          
+          mkdir -p _site/captcha/app
           cp index.html _site/index.html
           if [ -f captcha/captcha.html ]; then cp captcha/captcha.html _site/captcha/captcha.html; fi
-          cp -R captcha/coinflipper/build/web/* _site/app/
+          cp -R captcha/coinflipper/build/web/* _site/captcha/app/
 
       - name: Fix permissions
         run: |

@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 
-set BASE_HREF=/captcha/coinflipper/output/
+set BASE_HREF=/coinflipper/app/
 
 echo == Flutter Web Build (Batch) ==
 where flutter >nul 2>nul || (echo flutter command not found in PATH & exit /b 1)
@@ -13,17 +13,18 @@ if errorlevel 1 (
   exit /b %errorlevel%
 )
 
-if not exist output mkdir output
+set TARGET=..\app
+if not exist %TARGET% mkdir %TARGET%
 
-echo Mirroring build\web to output via robocopy
-robocopy build\web output /MIR /NFL /NDL /NJH /NJS /NP
+echo Mirroring build\web to %TARGET% via robocopy
+robocopy build\web %TARGET% /MIR /NFL /NDL /NJH /NJS /NP
 set RC=%errorlevel%
 if %RC% GEQ 8 (
   echo Robocopy reported issues (exit code %RC%)
   exit /b %RC%
 )
 
-echo Build assets copied to output
+echo Build assets copied to %TARGET%
 
 echo Done.
 endlocal

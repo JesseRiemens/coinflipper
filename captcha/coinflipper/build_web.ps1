@@ -1,5 +1,5 @@
 Param(
-  [string]$BaseHref = '/captcha/coinflipper/output/'
+  [string]$BaseHref = '/coinflipper/app/'
 )
 
 Write-Host '== Flutter Web Build (PowerShell) =='
@@ -17,11 +17,12 @@ if ($LASTEXITCODE -ne 0) {
   exit $LASTEXITCODE
 }
 
-# Ensure output directory exists and mirror build
-if (-not (Test-Path './output')) { New-Item -ItemType Directory -Path './output' | Out-Null }
+# Ensure target ../app directory exists and mirror build
+$targetPath = Join-Path '..' 'app'
+if (-not (Test-Path $targetPath)) { New-Item -ItemType Directory -Path $targetPath | Out-Null }
 
-Write-Host 'Mirroring build/web to output via robocopy'
-robocopy .\build\web .\output /MIR /NFL /NDL /NJH /NJS /NP
+Write-Host "Mirroring build/web to $targetPath via robocopy"
+robocopy .\build\web $targetPath /MIR /NFL /NDL /NJH /NJS /NP
 $rc = $LASTEXITCODE
 # Robocopy exit codes: 0=No copy,1=Copied, others may still be OK (<8)
 if ($rc -ge 8) {
@@ -29,5 +30,5 @@ if ($rc -ge 8) {
   exit $rc
 }
 
-Write-Host 'Build assets copied to output'
+Write-Host "Build assets copied to $targetPath"
 Write-Host 'Done.'

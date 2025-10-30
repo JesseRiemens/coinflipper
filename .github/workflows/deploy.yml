@@ -37,18 +37,16 @@ jobs:
 
       - name: Build web (release)
         working-directory: captcha/coinflipper
-        # Deploy Flutter build at project site root: https://jesseriemens.github.io/coinflipper/
-        run: flutter build web --release --base-href /coinflipper/ --no-web-resources-cdn --no-wasm-dry-run
+        # Deploy Flutter build under /coinflipper/app/ to preserve outer HTML pages at root.
+        run: flutter build web --release --base-href /coinflipper/app/ --no-web-resources-cdn --no-wasm-dry-run
 
       - name: Prepare site directory
         run: |
-          mkdir -p _site
-          # Root landing page (optional separate from Flutter app index)
+          mkdir -p _site/app
+          mkdir -p _site/captcha
           cp index.html _site/index.html
-          # Captcha HTML at /coinflipper/captcha.html
-          if [ -f captcha/captcha.html ]; then cp captcha/captcha.html _site/captcha.html; fi
-          # Place Flutter build at site root so its own index.html is accessible directly
-          cp -R captcha/coinflipper/build/web/* _site/
+          if [ -f captcha/captcha.html ]; then cp captcha/captcha.html _site/captcha/captcha.html; fi
+          cp -R captcha/coinflipper/build/web/* _site/app/
 
       - name: Fix permissions
         run: |

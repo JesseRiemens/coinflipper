@@ -39,7 +39,7 @@ class _CoinFlipperCaptchaState extends State<CoinFlipperCaptcha> {
   static const int _totalFlips = 8;
   static const int _maxCorrectAllowed = 4;
   static const double _successProbability =
-      0.65; // Chance a flip counts as correct.
+      0.72; // Chance a flip counts as correct.
   // Jitter configuration (milliseconds)
   static const int _guessDelayBaseMs = 800;
   static const int _guessDelayJitterMs =
